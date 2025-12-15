@@ -1731,23 +1731,17 @@ void GLCanvas3D::refresh_camera_scene_box()
 BoundingBoxf3 GLCanvas3D::volumes_bounding_box(bool current_plate_only) const
 {
     BoundingBoxf3 bb;
-    BoundingBoxf3 expand_part_plate_list_box;
-    bool          is_limit = m_canvas_type != ECanvasType::CanvasAssembleView;
-    if (is_limit) {
-        if (current_plate_only) {
-            expand_part_plate_list_box = wxGetApp().plater()->get_partplate_list().get_curr_plate()->get_bounding_box();
-        } else {
-            auto        plate_list_box = wxGetApp().plater()->get_partplate_list().get_bounding_box();
-            auto        horizontal_radius = 0.5 * sqrt(std::pow(plate_list_box.min[0] - plate_list_box.max[0], 2) + std::pow(plate_list_box.min[1] - plate_list_box.max[1], 2));
-            const float scale             = 2;
-            expand_part_plate_list_box.merge(plate_list_box.min - scale * Vec3d(horizontal_radius, horizontal_radius, 0));
-            expand_part_plate_list_box.merge(plate_list_box.max + scale * Vec3d(horizontal_radius, horizontal_radius, 0));
-        }
+    BoundingBoxf3 current_plate_box;
+    // Only limit to current plate when explicitly requested, not based on distance from plate
+    // This fixes clipping issues when models are placed off the build plate (see issue #4787)
+    bool limit_to_current_plate = current_plate_only && m_canvas_type != ECanvasType::CanvasAssembleView;
+    if (limit_to_current_plate) {
+        current_plate_box = wxGetApp().plater()->get_partplate_list().get_curr_plate()->get_bounding_box();
     }
     for (const GLVolume *volume : m_volumes.volumes) {
         if (!m_apply_zoom_to_volumes_filter || ((volume != nullptr) && volume->zoom_to_volumes)) {
-            const auto v_bb     = volume->transformed_bounding_box();
-            if (is_limit && !expand_part_plate_list_box.overlap(v_bb))
+            const auto v_bb = volume->transformed_bounding_box();
+            if (limit_to_current_plate && !current_plate_box.overlap(v_bb))
                 continue;
             bb.merge(v_bb);
         }
