@@ -5032,9 +5032,97 @@ LayerResult GCode::process_layer(
                     m_layer = layer_to_print.layer();
                     m_object_layer_over_raft = object_layer_over_raft;
                 }
-                //FIXME order islands?
+                // Order islands by proximity to minimize travel distance (solving TSP).
                 // Sequential tool path ordering of multiple parts within the same object, aka. perimeter tracking (#5511)
-                for (ObjectByExtruder::Island &island : instance_to_print.object_by_extruder.islands) {
+                auto& islands = instance_to_print.object_by_extruder.islands;
+
+                // Helper lambda to check if an island has actual extrusion content
+                auto island_has_extrusions = [](const ObjectByExtruder::Island& island) -> bool {
+                    for (const auto& region : island.by_region) {
+                        if (!region.perimeters.empty() || !region.infills.empty())
+                            return true;
+                    }
+                    return false;
+                };
+
+                // Helper lambda to compute the centroid of an island from its extrusion entities
+                auto get_island_centroid = [](const ObjectByExtruder::Island& island) -> Point {
+                    Point centroid = Point::Zero();
+                    size_t count = 0;
+                    for (const auto& region : island.by_region) {
+                        for (const ExtrusionEntity* ee : region.perimeters) {
+                            if (ee != nullptr) {
+                                centroid += ee->first_point();
+                                ++count;
+                            }
+                        }
+                        for (const ExtrusionEntity* ee : region.infills) {
+                            if (ee != nullptr) {
+                                centroid += ee->first_point();
+                                ++count;
+                            }
+                        }
+                    }
+                    if (count > 0)
+                        centroid = Point(centroid.x() / coord_t(count), centroid.y() / coord_t(count));
+                    return centroid;
+                };
+
+                // Collect non-empty islands and compute their centroids for TSP ordering
+                std::vector<size_t> island_order;
+                island_order.reserve(islands.size());
+                Points island_centroids;
+                island_centroids.reserve(islands.size());
+
+                for (size_t i = 0; i < islands.size(); ++i) {
+                    if (island_has_extrusions(islands[i])) {
+                        island_order.push_back(i);
+                        island_centroids.push_back(get_island_centroid(islands[i]));
+                    }
+                }
+
+                // Apply TSP ordering if there are multiple islands
+                gcode += "; Island count: " + std::to_string(island_centroids.size()) + " (total in vector: " + std::to_string(islands.size()) + ")\n";
+                if (island_centroids.size() > 1) {
+                    // m_last_pos is in object-local scaled coordinates (same as island centroids)
+                    // Use it as the starting point for TSP ordering to minimize initial travel
+                    Point start_point = m_last_pos;
+                    // Get optimal ordering using greedy TSP algorithm
+                    std::vector<size_t> tsp_order = chain_points(island_centroids, &start_point);
+                    // Reorder island indices according to TSP result
+                    std::vector<size_t> reordered;
+                    reordered.reserve(tsp_order.size());
+                    for (size_t idx : tsp_order)
+                        reordered.push_back(island_order[idx]);
+                    island_order = std::move(reordered);
+
+                    // Debug: output TSP ordering info to G-code
+                    gcode += "; TSP island ordering applied: " + std::to_string(island_centroids.size()) + " islands, order: [";
+                    for (size_t i = 0; i < island_order.size(); ++i) {
+                        if (i > 0) gcode += ", ";
+                        gcode += std::to_string(island_order[i]);
+                    }
+                    gcode += "]\n";
+                }
+
+                // Process islands in optimized order
+                size_t island_sequence = 0;
+                for (size_t island_idx : island_order) {
+                    // Debug: mark each island in the G-code with detailed info
+                    ObjectByExtruder::Island &island = islands[island_idx];
+                    size_t total_perimeters = 0, total_infills = 0, num_regions = 0;
+                    for (const auto& region : island.by_region) {
+                        if (!region.perimeters.empty() || !region.infills.empty()) {
+                            total_perimeters += region.perimeters.size();
+                            total_infills += region.infills.size();
+                            ++num_regions;
+                        }
+                    }
+                    gcode += "; Processing island " + std::to_string(island_sequence++) +
+                             " (original index " + std::to_string(island_idx) +
+                             ", regions: " + std::to_string(num_regions) +
+                             ", perimeter entities: " + std::to_string(total_perimeters) +
+                             ", infill entities: " + std::to_string(total_infills) + ")\n";
                     const auto& by_region_specific = is_anything_overridden ? island.by_region_per_copy(by_region_per_copy_cache, static_cast<unsigned int>(instance_to_print.instance_id), extruder_id, print_wipe_extrusions != 0) : island.by_region;
                     //BBS: add brim by obj by extruder
                     if (first_layer) {
@@ -5057,7 +5145,6 @@ LayerResult GCode::process_layer(
                         m_avoid_crossing_perimeters.use_external_mp_once();
                     m_last_obj_copy = this_object_copy;
                     this->set_origin(unscale(offset));
-                    //FIXME the following code prints regions in the order they are defined, the path is not optimized in any way.
 
                     auto has_infill = [](const std::vector<ObjectByExtruder::Island::Region> &by_region) {
                         for (auto region : by_region) {
@@ -5331,8 +5418,6 @@ std::string GCode::change_layer(coordf_t print_z)
 
     return gcode;
 }
-
-
 
 static std::unique_ptr<EdgeGrid::Grid> calculate_layer_edge_grid(const Layer& layer)
 {
@@ -5719,18 +5804,72 @@ std::string GCode::extrude_path(ExtrusionPath path, std::string description, dou
 std::string GCode::extrude_perimeters(const Print &print, const std::vector<ObjectByExtruder::Island::Region> &by_region, bool is_first_layer, bool is_infill_first)
 {
     std::string gcode;
-    for (const ObjectByExtruder::Island::Region &region : by_region)
-        if (! region.perimeters.empty()) {
-            m_config.apply(print.get_print_region(&region - &by_region.front()).config());
-            // BBS: for first layer, we always print wall firstly to get better bed adhesive force
-            // This behaviour is same with cura
-            const bool should_print = is_first_layer ? !is_infill_first
-                : (m_config.is_infill_first == is_infill_first);
-            if (!should_print) continue;
 
-            for (const ExtrusionEntity* ee : region.perimeters)
-                gcode += this->extrude_entity(*ee, "perimeter", -1., region.perimeters);
+    // Collect all perimeters from all regions that should be printed, for TSP ordering
+    ExtrusionEntitiesPtr all_perimeters;
+    std::vector<size_t> region_indices; // Track which region each perimeter came from
+
+    for (size_t region_idx = 0; region_idx < by_region.size(); ++region_idx) {
+        const ObjectByExtruder::Island::Region &region = by_region[region_idx];
+        if (region.perimeters.empty())
+            continue;
+
+        // Check if this region should print based on infill_first setting
+        m_config.apply(print.get_print_region(region_idx).config());
+        const bool should_print = is_first_layer ? !is_infill_first
+            : (m_config.is_infill_first == is_infill_first);
+        if (!should_print)
+            continue;
+
+        for (ExtrusionEntity* ee : region.perimeters) {
+            all_perimeters.push_back(ee);
+            region_indices.push_back(region_idx);
         }
+    }
+
+    if (all_perimeters.empty())
+        return gcode;
+
+    // Apply TSP ordering to minimize travel between perimeters
+    if (all_perimeters.size() > 1) {
+        // Get the ordering from chain_extrusion_entities (returns index and reversal flag)
+        std::vector<std::pair<size_t, bool>> ordering = chain_extrusion_entities(all_perimeters, &m_last_pos);
+
+        // Debug: output perimeter TSP info
+        gcode += "; Perimeter TSP ordering: " + std::to_string(all_perimeters.size()) + " entities, order: [";
+        for (size_t i = 0; i < ordering.size(); ++i) {
+            if (i > 0) gcode += ", ";
+            gcode += std::to_string(ordering[i].first);
+        }
+        gcode += "]\n";
+
+        // Reorder the perimeters and region indices according to TSP result
+        ExtrusionEntitiesPtr ordered_perimeters;
+        std::vector<size_t> ordered_region_indices;
+        ordered_perimeters.reserve(ordering.size());
+        ordered_region_indices.reserve(ordering.size());
+
+        for (const auto& [idx, reversed] : ordering) {
+            ordered_perimeters.push_back(all_perimeters[idx]);
+            ordered_region_indices.push_back(region_indices[idx]);
+            // Note: we don't reverse perimeters here as seam placement handles orientation
+        }
+
+        all_perimeters = std::move(ordered_perimeters);
+        region_indices = std::move(ordered_region_indices);
+    }
+
+    // Extrude perimeters in optimized order
+    size_t last_region_idx = size_t(-1);
+    for (size_t i = 0; i < all_perimeters.size(); ++i) {
+        // Apply config if we switched regions
+        if (region_indices[i] != last_region_idx) {
+            m_config.apply(print.get_print_region(region_indices[i]).config());
+            last_region_idx = region_indices[i];
+        }
+        gcode += this->extrude_entity(*all_perimeters[i], "perimeter", -1., by_region[region_indices[i]].perimeters);
+    }
+
     return gcode;
 }
 
