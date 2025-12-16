@@ -5876,29 +5876,75 @@ std::string GCode::extrude_perimeters(const Print &print, const std::vector<Obje
 // Chain the paths hierarchically by a greedy algorithm to minimize a travel distance.
 std::string GCode::extrude_infill(const Print &print, const std::vector<ObjectByExtruder::Island::Region> &by_region, bool ironing)
 {
-    std::string 		 gcode;
-    ExtrusionEntitiesPtr extrusions;
-    const char*          extrusion_name = ironing ? "ironing" : "infill";
-    for (const ObjectByExtruder::Island::Region &region : by_region)
-        if (! region.infills.empty()) {
-            extrusions.clear();
-            extrusions.reserve(region.infills.size());
-            for (ExtrusionEntity *ee : region.infills)
-                if ((ee->role() == erIroning) == ironing)
-                    extrusions.emplace_back(ee);
-            if (! extrusions.empty()) {
-                m_config.apply(print.get_print_region(&region - &by_region.front()).config());
-                chain_and_reorder_extrusion_entities(extrusions, &m_last_pos);
-                for (const ExtrusionEntity *fill : extrusions) {
-                    auto *eec = dynamic_cast<const ExtrusionEntityCollection*>(fill);
-                    if (eec) {
-                        for (ExtrusionEntity *ee : eec->chained_path_from(m_last_pos).entities)
-                            gcode += this->extrude_entity(*ee, extrusion_name);
-                    } else
-                        gcode += this->extrude_entity(*fill, extrusion_name);
-                }
+    std::string gcode;
+    const char* extrusion_name = ironing ? "ironing" : "infill";
+
+    // Collect all infill entities from all regions for cross-region TSP ordering
+    ExtrusionEntitiesPtr all_infills;
+    std::vector<size_t> region_indices; // Track which region each infill came from
+
+    for (size_t region_idx = 0; region_idx < by_region.size(); ++region_idx) {
+        const ObjectByExtruder::Island::Region &region = by_region[region_idx];
+        if (region.infills.empty())
+            continue;
+
+        for (ExtrusionEntity *ee : region.infills) {
+            if ((ee->role() == erIroning) == ironing) {
+                all_infills.push_back(ee);
+                region_indices.push_back(region_idx);
             }
         }
+    }
+
+    if (all_infills.empty())
+        return gcode;
+
+    // Apply TSP ordering across all regions
+    if (all_infills.size() > 1) {
+        std::vector<std::pair<size_t, bool>> ordering = chain_extrusion_entities(all_infills, &m_last_pos);
+
+        // Debug: output infill TSP info
+        gcode += "; Infill TSP ordering: " + std::to_string(all_infills.size()) + " entities, order: [";
+        for (size_t i = 0; i < ordering.size(); ++i) {
+            if (i > 0) gcode += ", ";
+            gcode += std::to_string(ordering[i].first);
+        }
+        gcode += "]\n";
+
+        // Reorder infills and region indices according to TSP result
+        ExtrusionEntitiesPtr ordered_infills;
+        std::vector<size_t> ordered_region_indices;
+        ordered_infills.reserve(ordering.size());
+        ordered_region_indices.reserve(ordering.size());
+
+        for (const auto& [idx, reversed] : ordering) {
+            ordered_infills.push_back(all_infills[idx]);
+            ordered_region_indices.push_back(region_indices[idx]);
+        }
+
+        all_infills = std::move(ordered_infills);
+        region_indices = std::move(ordered_region_indices);
+    }
+
+    // Extrude infills in optimized order
+    size_t last_region_idx = size_t(-1);
+    for (size_t i = 0; i < all_infills.size(); ++i) {
+        // Apply config if we switched regions
+        if (region_indices[i] != last_region_idx) {
+            m_config.apply(print.get_print_region(region_indices[i]).config());
+            last_region_idx = region_indices[i];
+        }
+
+        const ExtrusionEntity *fill = all_infills[i];
+        auto *eec = dynamic_cast<const ExtrusionEntityCollection*>(fill);
+        if (eec) {
+            for (ExtrusionEntity *ee : eec->chained_path_from(m_last_pos).entities)
+                gcode += this->extrude_entity(*ee, extrusion_name);
+        } else {
+            gcode += this->extrude_entity(*fill, extrusion_name);
+        }
+    }
+
     return gcode;
 }
 
