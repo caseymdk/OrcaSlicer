@@ -221,8 +221,12 @@ wxDEFINE_EVENT(EVT_NOTICE_FULL_SCREEN_CHANGED, IntEvent);
 #define PRINTER_PANEL_RADIUS (6) // ORCA
 #define BTN_SYNC_SIZE (wxSize(FromDIP(96), FromDIP(98)))
 
-wxFont                    calib_font(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD, false, "NotoSans");
-Emboss::FontFileWithCache calib_font_with_cache(std::move(WxFontUtils::create_font_file(calib_font)));
+// Lazy initialization to avoid static initialization order issues with wxWidgets
+static Emboss::FontFileWithCache& get_calib_font_with_cache() {
+    static wxFont calib_font(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD, false, "NotoSans");
+    static Emboss::FontFileWithCache calib_font_with_cache(WxFontUtils::create_font_file(calib_font));
+    return calib_font_with_cache;
+}
 
 /// <summary>
 /// Get the orthogonal box mesh (Experemental, can rethink and add)
@@ -282,7 +286,7 @@ static TriangleMesh get_ortho_triangle_mesh(Vec3d size, Vec3f position = Vec3f()
 static TriangleMesh get_text_mesh(const char *text, FontProp &font_props, Vec3d size, Vec3f position = Vec3f(), Vec2f background = Vec2f())
 {
     TriangleMesh mesh(
-        Emboss::text2model(calib_font_with_cache, text, font_props, Vec3d(size.x(), size.y(), size.z() + background.x()))); // get text mesh
+        Emboss::text2model(get_calib_font_with_cache(), text, font_props, Vec3d(size.x(), size.y(), size.z() + background.x()))); // get text mesh
     if (background.x()) {
         BoundingBoxf3 bb3     = mesh.bounding_box();
         float         offset  = background.y();
