@@ -79,6 +79,8 @@ static std::string get_view_type_string(libvgcode::EViewType view_type)
         return _u8L("Fan Speed");
     else if (view_type == libvgcode::EViewType::Temperature)
         return _u8L("Temperature");
+    else if (view_type == libvgcode::EViewType::PressureAdvance)
+        return _u8L("Pressure Advance");
     else if (view_type == libvgcode::EViewType::VolumetricFlowRate)
         return _u8L("Flow");
     else if (view_type == libvgcode::EViewType::ActualVolumetricFlowRate)
@@ -396,6 +398,10 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                 });
                 append_table_row(_u8L("Temperature") + " (" + _u8L("°C") + ")", [&vertex, &buff]() {
                     sprintf(buff, "%.0f", vertex.temperature);
+                    ImGuiWrapper::text(std::string(buff));
+                });
+                append_table_row(_u8L("PA"), [&vertex, &buff]() {
+                    sprintf(buff, "%.4f", vertex.pressure_advance);
                     ImGuiWrapper::text(std::string(buff));
                 });
                 append_table_row(_u8L("Time"), [viewer, &vertex, &buff, vertex_id]() {
@@ -855,6 +861,7 @@ void GCodeViewer::update_by_mode(ConfigOptionMode mode)
     view_type_items.push_back(libvgcode::EViewType::LayerTimeLogarithmic);
     view_type_items.push_back(libvgcode::EViewType::FanSpeed);
     view_type_items.push_back(libvgcode::EViewType::Temperature);
+    view_type_items.push_back(libvgcode::EViewType::PressureAdvance);
     //if (mode == ConfigOptionMode::comDevelop) {
     //    view_type_items.push_back(EViewType::Tool);
     //}
@@ -3313,6 +3320,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     }
     case libvgcode::EViewType::FanSpeed:       { imgui.title(_u8L("Fan Speed (%)")); break; }
     case libvgcode::EViewType::Temperature:    { imgui.title(_u8L("Temperature (°C)")); break; }
+    case libvgcode::EViewType::PressureAdvance:{ imgui.title(_u8L("Pressure Advance")); break; }
     case libvgcode::EViewType::VolumetricFlowRate:
         { imgui.title(_u8L("Volumetric flow rate (mm³/s)")); break; }
     case libvgcode::EViewType::ActualVolumetricFlowRate:
@@ -3489,6 +3497,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
     }
     case libvgcode::EViewType::FanSpeed:                 { append_range(m_viewer.get_color_range(libvgcode::EViewType::FanSpeed), 0); break; }
     case libvgcode::EViewType::Temperature:              { append_range(m_viewer.get_color_range(libvgcode::EViewType::Temperature), 0); break; }
+    case libvgcode::EViewType::PressureAdvance:          { append_range(m_viewer.get_color_range(libvgcode::EViewType::PressureAdvance), 3); break; }
     case libvgcode::EViewType::LayerTimeLinear:          { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLinear), true); break; }
     case libvgcode::EViewType::LayerTimeLogarithmic:     { append_range(m_viewer.get_color_range(libvgcode::EViewType::LayerTimeLogarithmic), true); break; }
     case libvgcode::EViewType::VolumetricFlowRate:       { append_range(m_viewer.get_color_range(libvgcode::EViewType::VolumetricFlowRate), 2); break; }

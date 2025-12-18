@@ -184,6 +184,7 @@ class Print;
             float travel_dist{ 0.0f }; // mm
             float fan_speed{ 0.0f }; // percentage
             float temperature{ 0.0f }; // Celsius degrees
+            float pressure_advance{ 0.0f };
             std::array<float, static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count)> time{ 0.0f, 0.0f }; // s
             unsigned int layer_id{ 0 };
             bool internal_only{ false };
@@ -774,6 +775,7 @@ class Print;
         float m_travel_dist; // mm
         float m_fan_speed; // percentage
         float m_z_offset; // mm
+        float m_pressure_advance;
         ExtrusionRole m_extrusion_role;
         std::vector<int> m_filament_maps;
         std::vector<unsigned char> m_last_filament_id;
@@ -977,6 +979,11 @@ class Print;
 
         // Disable fan
         void process_M107(const GCodeReader::GCodeLine& line);
+
+        // Set pressure advance
+        void process_M900(const GCodeReader::GCodeLine& line);
+        void process_M572(const GCodeReader::GCodeLine &line);
+        void process_SET_PRESSURE_ADVANCE(const GCodeReader::GCodeLine& line);
 
         // Set tool (Sailfish)
         void process_M108(const GCodeReader::GCodeLine& line);

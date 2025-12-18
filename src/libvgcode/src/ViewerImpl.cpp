@@ -1483,6 +1483,10 @@ Color ViewerImpl::get_vertex_color(const PathVertex& v) const
     {
         return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_temperature_range.get_color_at(v.temperature);
     }
+    case EViewType::PressureAdvance:
+    {
+        return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_pressure_advance_range.get_color_at(v.pressure_advance);
+    }
     case EViewType::VolumetricFlowRate:
     {
         return v.is_travel() ? get_option_color(move_type_to_option(v.type)) : m_volumetric_rate_range.get_color_at(v.volumetric_rate());
@@ -1572,6 +1576,7 @@ const ColorRange& ViewerImpl::get_color_range(EViewType type) const
     case EViewType::ActualSpeed:              { return m_actual_speed_range; }
     case EViewType::FanSpeed:                 { return m_fan_speed_range; }
     case EViewType::Temperature:              { return m_temperature_range; }
+    case EViewType::PressureAdvance:          { return m_pressure_advance_range; }
     case EViewType::VolumetricFlowRate:       { return m_volumetric_rate_range; }
     case EViewType::ActualVolumetricFlowRate: { return m_actual_volumetric_rate_range; }
     case EViewType::LayerTimeLinear:          { return m_layer_time_range[0]; }
@@ -1590,6 +1595,7 @@ void ViewerImpl::set_color_range_palette(EViewType type, const Palette& palette)
     case EViewType::ActualSpeed:              { m_actual_speed_range.set_palette(palette);    break; }
     case EViewType::FanSpeed:                 { m_fan_speed_range.set_palette(palette);       break; }
     case EViewType::Temperature:              { m_temperature_range.set_palette(palette);     break; }
+    case EViewType::PressureAdvance:          { m_pressure_advance_range.set_palette(palette); break; }
     case EViewType::VolumetricFlowRate:       { m_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::ActualVolumetricFlowRate: { m_actual_volumetric_rate_range.set_palette(palette); break; }
     case EViewType::LayerTimeLinear:          { m_layer_time_range[0].set_palette(palette);   break; }
@@ -1627,6 +1633,7 @@ size_t ViewerImpl::get_used_cpu_memory() const
     ret += m_actual_speed_range.size_in_bytes_cpu();
     ret += m_fan_speed_range.size_in_bytes_cpu();
     ret += m_temperature_range.size_in_bytes_cpu();
+    ret += m_pressure_advance_range.size_in_bytes_cpu();
     ret += m_volumetric_rate_range.size_in_bytes_cpu();
     ret += m_actual_volumetric_rate_range.size_in_bytes_cpu();
     for (size_t i = 0; i < COLOR_RANGE_TYPES_COUNT; ++i) {
@@ -1777,6 +1784,7 @@ void ViewerImpl::update_color_ranges()
     m_actual_speed_range.reset();
     m_fan_speed_range.reset();
     m_temperature_range.reset();
+    m_pressure_advance_range.reset();
     m_volumetric_rate_range.reset();
     m_actual_volumetric_rate_range.reset();
     m_layer_time_range[0].reset(); // ColorRange::EType::Linear
@@ -1793,6 +1801,7 @@ void ViewerImpl::update_color_ranges()
             }
             m_fan_speed_range.update(round_to_bin(v.fan_speed));
             m_temperature_range.update(round_to_bin(v.temperature));
+            m_pressure_advance_range.update(round_to_bin(v.pressure_advance));
         }
         if ((v.is_travel() && m_settings.options_visibility[size_t(EOptionType::Travels)]) ||
             (v.is_wipe() && m_settings.options_visibility[size_t(EOptionType::Wipes)]) ||
