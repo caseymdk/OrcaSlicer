@@ -48,6 +48,10 @@ struct PathVertex
     // Segment temperature
     //
     float temperature{ 0.0f };
+    //
+    // Segment pressure advance
+    //
+    float pressure_advance{ 0.0f };
 #if VGCODE_ENABLE_COG_AND_TOOL_MARKERS
     //
     // Segment weight
