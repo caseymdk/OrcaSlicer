@@ -1077,6 +1077,12 @@ wxDataViewItem ObjectDataViewModel::Delete(const wxDataViewItem &item)
     if (node_parent->GetChildCount() == 0 && node_parent->m_type == itLayerRoot)
     {
         ObjectDataViewModelNode* obj_node = node_parent->GetParent();
+
+        // Notify wxWidgets BEFORE deleting to avoid use-after-free
+        // First notify about the layer item being deleted from the layer root
+        ItemDeleted(parent, item);
+
+        // Then notify about the layer root being deleted from the object
         obj_node->GetChildren().Remove(node_parent);
         ret_item = wxDataViewItem(obj_node);
         wxDataViewItem node_parent_item(node_parent);
@@ -1085,8 +1091,10 @@ wxDataViewItem ObjectDataViewModel::Delete(const wxDataViewItem &item)
         if (obj_node->GetChildCount() == 0)
             obj_node->m_container = false;
 #endif //__WXGTK__
-        // Notify wxWidgets BEFORE deleting to avoid use-after-free
         ItemDeleted(ret_item, node_parent_item);
+
+        // Now safe to delete both nodes
+        delete node;
         delete node_parent;
         return ret_item;
     }
@@ -1137,9 +1145,6 @@ wxDataViewItem ObjectDataViewModel::Delete(const wxDataViewItem &item)
         }
     }
 
-    // free the node
-    delete node;
-
     // set m_containet to FALSE if parent has no child
 #ifndef __WXGTK__
     if (node_parent->GetChildCount() == 0)
@@ -1147,8 +1152,12 @@ wxDataViewItem ObjectDataViewModel::Delete(const wxDataViewItem &item)
 #endif //__WXGTK__
     ret_item = parent;
 
-	// notify control
+	// Notify wxWidgets BEFORE deleting to avoid use-after-free
 	ItemDeleted(parent, item);
+
+    // free the node
+    delete node;
+
 	return ret_item;
 }
 
